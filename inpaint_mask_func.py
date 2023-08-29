@@ -12,15 +12,17 @@ import torchvision
 
 
 
-
+#MJ:  inpainting_mask = draw_masks_from_boxes( batch['boxes'], 64, randomize_fg_mask=self.config.randomize_fg_mask, random_add_bg_mask=self.config.random_add_bg_mask).cuda()
+           
 def draw_masks_from_boxes(boxes, size, randomize_fg_mask=False, random_add_bg_mask=False):
     "boxes should be the output from dataset, which is a batch of bounding boxes"
 
     image_masks = [] 
-    for box in boxes: # This is batch dimension
+    for box in boxes: #  This is batch dimension
+                      #MJ: for each image in the batch; box = the boxes of the current image
 
         image_mask = torch.ones(size,size)
-        for bx in box:
+        for bx in box: #MJ: bx = a box in the boxes of the current image
             x0,y0,x1,y1 = bx*size
             x0,y0,x1,y1 = int(x0), int(y0), int(x1), int(y1)
             obj_width = x1-x0
@@ -38,6 +40,7 @@ def draw_masks_from_boxes(boxes, size, randomize_fg_mask=False, random_add_bg_ma
             image_mask *= bg_mask
 
         image_masks.append(image_mask)
+        
     return torch.stack(image_masks).unsqueeze(1)
 
 

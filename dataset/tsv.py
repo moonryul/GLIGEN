@@ -37,7 +37,7 @@ def read_to_character(fp, c):
     return ''.join(result)
 
 
-class TSVFile(object):
+class TSVFile(object): #MJ: A TSV file stands for "Tab-Separated Values" file. 
     def __init__(self,
                  tsv_file: str,
                  if_generate_lineidx: bool = False,

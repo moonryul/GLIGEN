@@ -65,7 +65,7 @@ def read_official_ckpt(ckpt_path):
     "Read offical pretrained SD ckpt and convert into my style" 
     state_dict = torch.load(ckpt_path, map_location="cpu")["state_dict"]
     out = {}
-    out["model"] = {}
+    out["model"] = {} #MJ: UnetModel
     out["text_encoder"] = {}
     out["autoencoder"] = {}
     out["unexpected"] = {}
@@ -99,12 +99,32 @@ def sub_batch(batch, num=1):
         batch[k] = batch[k][0:num]
     return batch
 
-
+#MJ:
+# The wrap_loader function creates an infinite generator around the provided loader.
+# When the original loader is exhausted and would raise a StopIteration exception, 
+# the outer loop in wrap_loader just starts iterating over the loader again.
+# This effectively loops through the dataset indefinitely.
 def wrap_loader(loader):
     while True:
         for batch in loader:  # TODO: it seems each time you have the same order for all epoch?? 
+            
+            #MJ: If the original loader_train does not shuffle the data at the start of each epoch, 
+            # then this infinite generator will yield the data in the same order every time it starts over.
+            # This can be a concern for training as shuffling data each epoch is commonly used to ensure 
+            # that the model doesn't learn any unintended patterns from the order of the data. 
+            # If shuffling is desired, 
+            # the original loader (loader_train) should be created with the shuffle=True argument
             yield batch
 
+#MJ:
+# When the loader is exhausted, it indeed raises a StopIteration exception, 
+# but this exception is implicitly caught by the for loop, causing it to exit gracefully.
+# In other languages or contexts, you might need to explicitly handle the exception,
+# but in Python's for loop, the StopIteration is how the loop knows to exit.
+
+# So, the StopIteration exception is expected and is used by the for loop to know when to stop.
+# The outer while loop then ensures that, when the for loop stops, 
+# it starts again, creating the effect of an infinite generator.
 
 def disable_grads(model):
     for p in model.parameters():
@@ -178,7 +198,7 @@ class Trainer:
 
 
         # = = = = = = = = = = = = = = = = = create model and diffusion = = = = = = = = = = = = = = = = = #
-        self.model = instantiate_from_config(config.model).to(self.device)
+        self.model = instantiate_from_config(config.model).to(self.device)  #MJ: UnetModel
         self.autoencoder = instantiate_from_config(config.autoencoder).to(self.device)
         self.text_encoder = instantiate_from_config(config.text_encoder).to(self.device)
         self.diffusion = instantiate_from_config(config.diffusion).to(self.device)
@@ -190,7 +210,7 @@ class Trainer:
         additional_channels = self.model.additional_channel_from_downsampler
         if self.config.inpaint_mode:
             additional_channels += 5 # 5 = 4(latent) + 1(mask)
-        add_additional_channels(state_dict["model"], additional_channels)
+        add_additional_channels(state_dict["model"], additional_channels)  #MJ: state_dict["model"] = UnetModel
         self.input_conv_train = True if additional_channels>0 else False
 
         # load original SD ckpt (with inuput conv may be modified) 
@@ -269,16 +289,19 @@ class Trainer:
 
 
 
-        # = = = = = = = = = = = = = = = = = = = = create data = = = = = = = = = = = = = = = = = = = = #  
+        # = = = = = = = = = = = = = = = = = = = = create dataset = = = = = = = = = = = = = = = = = = = = #  
         train_dataset_repeats = config.train_dataset_repeats if 'train_dataset_repeats' in config else None
         dataset_train = ConCatDataset(config.train_dataset_names, config.DATA_ROOT, train=True, repeats=train_dataset_repeats)
+        
         sampler = DistributedSampler(dataset_train, seed=config.seed) if config.distributed else None 
-        loader_train = DataLoader( dataset_train,  batch_size=config.batch_size, 
-                                                   shuffle=(sampler is None),
+        
+        loader_train = DataLoader( dataset_train,  batch_size=config.batch_size, #MJ. batch_size = 2
+                                                   shuffle=(sampler is None),  #MJ: True if sampler is None
                                                    num_workers=config.workers, 
                                                    pin_memory=True, 
                                                    sampler=sampler)
         self.dataset_train = dataset_train
+        
         self.loader_train = wrap_loader(loader_train)
 
         if get_rank() == 0:
@@ -297,10 +320,12 @@ class Trainer:
                 self.ema.load_state_dict(checkpoint["ema"])
             self.opt.load_state_dict(checkpoint["opt"])
             self.scheduler.load_state_dict(checkpoint["scheduler"])
+            
             self.starting_iter = checkpoint["iters"]
+            
             if self.starting_iter >= config.total_iters:
                 synchronize()
-                print("Training finished. Start exiting")
+                print("Training finished. No need of training => Start exiting")
                 exit()
 
 
@@ -321,9 +346,7 @@ class Trainer:
         if config.distributed:
             self.model = DDP( self.model, device_ids=[config.local_rank], output_device=config.local_rank, broadcast_buffers=False )
 
-
-
-
+    #def __init__(self, config)
 
     @torch.no_grad()
     def get_input(self, batch):
@@ -337,6 +360,12 @@ class Trainer:
         t = torch.where(t!=1000, t, 999) # if 1000, then replace it with 999
         
         inpainting_extra_input = None
+        
+        #MJ:
+        # parser.add_argument('--inpaint_mode', default=False, type=lambda x:x.lower() == "true", help="Train a GLIGEN model in inpaitning setting")
+        # parser.add_argument('--randomize_fg_mask', default=False, type=lambda x:x.lower() == "true", help="Only used if inpaint_mode is true. If true, 0.5 chance that fg mask will not be a box but a random mask. See code for details")
+        # parser.add_argument('--random_add_bg_mask', default=False, type=lambda x:x.lower() == "true", help="Only used if inpaint_mode is true. If true, 0.5 chance add arbitrary mask for the whole image. See code for details")
+    
         if self.config.inpaint_mode:
             # extra input for the inpainting model 
             inpainting_mask = draw_masks_from_boxes(batch['boxes'], 64, randomize_fg_mask=self.config.randomize_fg_mask, random_add_bg_mask=self.config.random_add_bg_mask).cuda()
@@ -351,8 +380,12 @@ class Trainer:
 
 
     def run_one_step(self, batch):
+        
         x_start, t, context, inpainting_extra_input, grounding_extra_input = self.get_input(batch)
-        noise = torch.randn_like(x_start)
+        
+        noise = torch.randn_like(x_start)  #MJ: a batch of noise matrices
+        
+        #MJ: Get the batch of noisy latent matrices at time t
         x_noisy = self.diffusion.q_sample(x_start=x_start, t=t, noise=noise)
 
         grounding_input = self.grounding_tokenizer_input.prepare(batch)
@@ -362,31 +395,63 @@ class Trainer:
                     inpainting_extra_input=inpainting_extra_input,
                     grounding_extra_input=grounding_extra_input,
                     grounding_input=grounding_input)
-        model_output = self.model(input)
-        
+        #MJ: Estimate the batch of the added noise matrices to the random noisy start image
+        model_output = self.model(input)  #MJ: self.model = UnetModel
+        #Get the difference between the estimated noise matrices and the added noise matrices 
         loss = torch.nn.functional.mse_loss(model_output, noise) * self.l_simple_weight
 
         self.loss_dict = {"loss": loss.item()}
 
         return loss 
         
-
+    #run_one_step(self, batch)
 
     def start_training(self):
-
+        #MJ: parser.add_argument("--total_iters", type=int,  default=500000, help="")
         iterator = tqdm(range(self.starting_iter, self.config.total_iters), desc='Training progress',  disable=get_rank() != 0 )
         self.model.train()
-        for iter_idx in iterator: # note: iter_idx is not from 0 if resume training
+        
+        #MJ: The training loop iterates over a set number of iterations (self.config.total_iters) rather than a set number of epochs.
+        
+        for iter_idx in iterator: # note: iter_idx is not from 0 if resume training ( for 0 to 500000)
             self.iter_idx = iter_idx
 
             self.opt.zero_grad()
+            
+            #MJ: get the next batch
+            # parser.add_argument("--batch_size", type=int,  default=2, help="")
+            
             batch = next(self.loader_train)
+            
+            #MJ: 
+            # Once it's exhausted, if you call next() on the loader's iterator again,
+            # it will raise a StopIteration exception, indicating there's no more data.
+            
+#             A common way to handle this in training loops that iterate over a fixed number of iterations
+#             (rather than epochs) is to recreate the data loader's iterator once it's exhausted. 
+#             This effectively starts a new epoch. For example, one could use something like:
+
+
+# try:
+#     batch = next(self.loader_train)
+# except StopIteration:
+#     self.loader_train = iter(DataLoader(...))  # Recreate the iterator
+#     batch = next(self.loader_train)
+    
+# However, the code you provided doesn't seem to handle this situation,
+# which means if the number of iterations (self.config.total_iters) exceeds the number of batches
+# in self.loader_train, the code will break with a StopIteration exception.
+# If this is not observed in practice, then it's possible that self.loader_train is an infinite generator,
+# or there are external mechanisms not shown in the code snippet that handle the iteration over the dataset.
+
             batch_to_device(batch, self.device)
 
             loss = self.run_one_step(batch)
+            
             loss.backward()
             self.opt.step() 
             self.scheduler.step()
+            
             if self.config.enable_ema:
                 update_ema(self.ema_params, self.master_params, self.config.ema_rate)
 
@@ -397,9 +462,15 @@ class Trainer:
                 if (iter_idx == 0)  or  ( iter_idx % self.config.save_every_iters == 0 )  or  (iter_idx == self.config.total_iters-1):
                     self.save_ckpt_and_result()
             synchronize()
-
+        #for iter_idx in iterator: # note: iter_idx is not from 0 if resume training ( for 0 to 500000)
         
         synchronize()
+        #MJ:
+        # when synchronize() is called, it's ensuring that all processes in the distributed training setup
+        # have reached the same point in the code. This is crucial in certain operations
+        # to ensure consistency across processes, like when logging metrics or saving checkpoints
+        
+        
         print("Training finished. Start exiting")
         exit()
 

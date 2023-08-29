@@ -49,6 +49,13 @@ def clean_files(image_files, normal_files):
 
 
 
+#MJ:
+# The SemanticDataset class is a custom dataset loader that is designed to handle images, 
+# their corresponding semantic annotations (often called semantic maps), and captions. 
+# The dataset seems to be specifically tailored for semantic segmentation tasks in computer vision, 
+# which involve classifying each pixel in an image into a particular category.
+
+#
 
 class SemanticDataset():
     def __init__(self, image_rootdir, sem_rootdir, caption_path, prob_use_caption=1, image_size=512, random_flip=False):

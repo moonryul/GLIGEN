@@ -44,7 +44,11 @@ def decode_item_hed(item):
     return item
 
 
-
+#MJ:
+# To sum it up, the "hed data" in this context likely refers to the edge-detected version of the images
+# in the dataset, likely generated using a Holistically-Nested Edge Detection method or something similar. 
+# The actual content of the hed data would be an image where the edges are highlighted, 
+# and this would be used alongside the original image for whatever the intended application is.
 class HedDataset():
     def __init__(self, tsv_path, hed_tsv_path, prob_use_caption=1, image_size=512, random_flip=False):
 

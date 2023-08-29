@@ -4,7 +4,7 @@ import torch
 
 
 
-
+#MJ: parser.add_argument("--DATA_ROOT", type=str,  default="DATA", help="path to DATA")
 class ConCatDataset():
     def __init__(self, dataset_name_list, ROOT, train=True, repeats=None):
         self.datasets = [] 
@@ -28,6 +28,7 @@ class ConCatDataset():
             params = dataset_dict['train_params'] if train else dataset_dict['val_params']
             if yaml_params is not None:
                 params.update(yaml_params)
+                
             dataset = instantiate_from_config( dict(target=target, params=params) )
             
             self.datasets.append(dataset)

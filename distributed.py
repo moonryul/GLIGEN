@@ -24,10 +24,17 @@ def synchronize():
 
     world_size = dist.get_world_size()
     if world_size == 1:
-        return
+        return #MJ: If there's only one process in the distributed setup (world_size == 1), 
+               # then there's no need to synchronize with other processes, so the function returns.
 
     dist.barrier()
+    #MJ: This is the actual synchronization step. A barrier is a primitive in parallel computing where all processes must reach the barrier before any can proceed. 
+    # This ensures that all processes in the distributed setup are synchronized at this point.
 
+# So, in the context of your previous code snippets, when synchronize() is called, 
+# it's ensuring that all processes in the distributed training setup have reached the same point in the code.
+# This is crucial in certain operations to ensure consistency across processes, 
+# like when logging metrics or saving checkpoints
 
 def get_world_size():
     if not dist.is_available():

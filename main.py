@@ -46,6 +46,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_every_iters", type=int,  default=5000, help="")
     parser.add_argument("--disable_inference_in_training", type=lambda x:x.lower() == "true",  default=False, help="Do not do inference, thus it is faster to run first a few iters. It may be useful for debugging ")
 
+    #MJ:  users might input boolean values in various formats, such as "True", "true", "TRUE", etc.
 
     args = parser.parse_args()
     assert args.scheduler_type in ['cosine', 'constant']
@@ -65,6 +66,7 @@ if __name__ == "__main__":
 
     config = OmegaConf.load(args.yaml_file) 
     config.update( vars(args) )
+    
     config.total_batch_size = config.batch_size * n_gpu
     if args.inpaint_mode:
         config.model.params.inpaint_mode = True
